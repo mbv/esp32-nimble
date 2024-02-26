@@ -395,7 +395,7 @@ impl BLECharacteristic {
     }
   }
 
-  pub(super) fn subscribe(&mut self, subscribe: &Subscribe) {
+  pub fn subscribe(&mut self, subscribe: &Subscribe) {
     let Ok(desc) = crate::utilities::ble_gap_conn_find(subscribe.conn_handle) else {
       return;
     };
