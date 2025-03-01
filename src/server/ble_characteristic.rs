@@ -2,29 +2,33 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use bitflags::bitflags;
 use core::{cell::UnsafeCell, ffi::c_void};
 use esp_idf_svc::sys;
-
-#[cfg(all(
-  esp_idf_version_major = "5",
-  esp_idf_version_minor = "2",
-  not(esp_idf_version_patch = "0")
-))]
-use crate::cpfd::Cpfd;
+#[cfg(not(cpfd))]
+use zerocopy::IntoBytes;
 
 use crate::{
   ble,
+  cpfd::Cpfd,
   utilities::{
-    ble_hs_mbuf_from_flat, ble_npl_hw_enter_critical, ble_npl_hw_exit_critical, mutex::Mutex,
-    os_mbuf_append, voidp_to_ref, BleUuid,
+    ble_npl_hw_enter_critical, ble_npl_hw_exit_critical, mutex::Mutex, voidp_to_ref, BleUuid,
+    OsMBuf,
   },
   AttValue, BLEConnDesc, BLEDescriptor, BLEDevice, BLEError, DescriptorProperties, OnWriteArgs,
-  BLE2904,
 };
 
 cfg_if::cfg_if! {
-  if #[cfg(all(
-    esp_idf_version_major = "5",
-    esp_idf_version_minor = "2",
-    not(any(esp_idf_version_patch = "0", esp_idf_version_patch = "1", esp_idf_version_patch="2"))
+  if #[cfg(any(
+    all(
+      esp_idf_version_major = "5",
+      esp_idf_version_minor = "2",
+      not(any(esp_idf_version_patch = "0", esp_idf_version_patch = "1", esp_idf_version_patch="2"))),
+    all(
+      esp_idf_version_major = "5",
+      esp_idf_version_minor = "3",
+      not(any(esp_idf_version_patch = "0", esp_idf_version_patch = "1"))),
+    all(
+      esp_idf_version_major = "5",
+      esp_idf_version_minor = "4",
+      esp_idf_version_patch = "0"),
   ))] {
     type NotifyTxType = sys::ble_gap_event__bindgen_ty_1__bindgen_ty_12;
     type Subscribe = sys::ble_gap_event__bindgen_ty_1__bindgen_ty_13;
@@ -124,18 +128,14 @@ pub struct BLECharacteristic {
   pub(crate) handle: u16,
   pub(crate) properties: NimbleProperties,
   value: AttValue,
-  on_read: Option<Box<dyn FnMut(&mut AttValue, &BLEConnDesc) + Send + Sync>>,
+  on_read: Option<Box<dyn FnMut(&mut Self, &BLEConnDesc) + Send + Sync>>,
   on_write: Option<Box<dyn FnMut(&mut OnWriteArgs) + Send + Sync>>,
   pub(crate) on_notify_tx: Option<Box<dyn FnMut(NotifyTx) + Send + Sync>>,
   descriptors: Vec<Arc<Mutex<BLEDescriptor>>>,
   svc_def_descriptors: Vec<sys::ble_gatt_dsc_def>,
   subscribed_list: Vec<(u16, NimbleSub)>,
   on_subscribe: Option<Box<dyn FnMut(&Self, &BLEConnDesc, NimbleSub) + Send + Sync>>,
-  #[cfg(all(
-    esp_idf_version_major = "5",
-    esp_idf_version_minor = "2",
-    not(esp_idf_version_patch = "0")
-  ))]
+  #[cfg(cpfd)]
   pub(crate) cpfd: [sys::ble_gatt_cpfd; 2],
 }
 
@@ -153,11 +153,7 @@ impl BLECharacteristic {
       svc_def_descriptors: Vec::new(),
       subscribed_list: Vec::new(),
       on_subscribe: None,
-      #[cfg(all(
-        esp_idf_version_major = "5",
-        esp_idf_version_minor = "2",
-        not(esp_idf_version_patch = "0")
-      ))]
+      #[cfg(cpfd)]
       cpfd: [Default::default(); 2],
     }
   }
@@ -171,7 +167,9 @@ impl BLECharacteristic {
     self
   }
 
+  #[deprecated(note = "Please use `set_value` + zerocopy::IntoBytes")]
   pub fn set_from<T: Sized>(&mut self, value: &T) -> &mut Self {
+    #[allow(deprecated)]
     self.value.set_from(value);
     self
   }
@@ -182,7 +180,7 @@ impl BLECharacteristic {
 
   pub fn on_read(
     &mut self,
-    callback: impl FnMut(&mut AttValue, &BLEConnDesc) + Send + Sync + 'static,
+    callback: impl FnMut(&mut Self, &BLEConnDesc) + Send + Sync + 'static,
   ) -> &mut Self {
     self.on_read = Some(Box::new(callback));
     self
@@ -219,15 +217,6 @@ impl BLECharacteristic {
     descriptor
   }
 
-  pub fn create_2904_descriptor(&mut self) -> BLE2904 {
-    let descriptor = Arc::new(Mutex::new(BLEDescriptor::new(
-      BleUuid::Uuid16(0x2904),
-      DescriptorProperties::READ,
-    )));
-    self.descriptors.push(descriptor.clone());
-    BLE2904::new(descriptor)
-  }
-
   pub(crate) fn construct_svc_def_descriptors(&mut self) -> *mut sys::ble_gatt_dsc_def {
     if self.descriptors.is_empty() {
       return core::ptr::null_mut();
@@ -261,7 +250,7 @@ impl BLECharacteristic {
 
   pub fn notify(&self) {
     for it in &self.subscribed_list {
-      if let Err(err) = self.send_value(self.value.value(), it.0, it.1) {
+      if let Err(err) = self.send_value(self.value.as_slice(), it.0, it.1) {
         ::log::warn!("notify error({}): {:?}", it.0, err);
       }
     }
@@ -280,27 +269,22 @@ impl BLECharacteristic {
         return BLEError::convert(sys::BLE_HS_EBUSY);
       }
 
-      let om = ble_hs_mbuf_from_flat(value);
-
-      let rc = unsafe { sys::ble_gatts_indicate_custom(conn_handle, self.handle, om) };
+      let om = OsMBuf::from_flat(value);
+      let rc = unsafe { sys::ble_gatts_indicate_custom(conn_handle, self.handle, om.0) };
       if rc != 0 {
         server.clear_indicate_wait(conn_handle);
       }
       BLEError::convert(rc as _)
     } else if flag.contains(NimbleSub::NOTIFY) && self.properties.contains(NimbleProperties::NOTIFY)
     {
-      let om = ble_hs_mbuf_from_flat(value);
-      ble!(unsafe { sys::ble_gatts_notify_custom(conn_handle, self.handle, om) })
+      let om = OsMBuf::from_flat(value);
+      ble!(unsafe { sys::ble_gatts_notify_custom(conn_handle, self.handle, om.0) })
     } else {
       BLEError::convert(sys::BLE_HS_EINVAL)
     }
   }
 
-  #[cfg(all(
-    esp_idf_version_major = "5",
-    esp_idf_version_minor = "2",
-    not(esp_idf_version_patch = "0")
-  ))]
+  #[cfg(cpfd)]
   /// Set the Characteristic Presentation Format.
   pub fn cpfd(&mut self, cpfd: Cpfd) {
     if cpfd.name_space == (sys::BLE_GATT_CHR_NAMESPACE_BT_SIG as _) {
@@ -314,6 +298,17 @@ impl BLECharacteristic {
     self.cpfd[0].description = cpfd.description;
   }
 
+  #[cfg(not(cpfd))]
+  /// Set the Characteristic Presentation Format.
+  pub fn cpfd(&mut self, cpfd: Cpfd) {
+    let descriptor = Arc::new(Mutex::new(BLEDescriptor::new(
+      BleUuid::Uuid16(0x2904),
+      DescriptorProperties::READ,
+    )));
+    descriptor.lock().set_value(cpfd.as_bytes());
+    self.descriptors.push(descriptor);
+  }
+
   pub(super) extern "C" fn handle_gap_event(
     conn_handle: u16,
     _attr_handle: u16,
@@ -323,8 +318,13 @@ impl BLECharacteristic {
     let ctxt = unsafe { &*ctxt };
 
     let mutex = unsafe { voidp_to_ref::<Mutex<Self>>(arg) };
-    let mut characteristic = mutex.lock();
 
+    if crate::utilities::ble_gap_conn_find(conn_handle).is_err() {
+      ::log::warn!("the conn handle does not exist");
+      return sys::BLE_ATT_ERR_UNLIKELY as _;
+    }
+
+    let mut characteristic = mutex.lock();
     if unsafe { sys::ble_uuid_cmp((*ctxt.__bindgen_anon_1.chr).uuid, &characteristic.uuid.u) != 0 }
     {
       return sys::BLE_ATT_ERR_UNLIKELY as _;
@@ -338,14 +338,14 @@ impl BLECharacteristic {
           if (*(ctxt.om)).om_pkthdr_len > 8 || characteristic.value.len() <= (desc.mtu() - 3) as _ {
             let characteristic = UnsafeCell::new(&mut characteristic);
             if let Some(callback) = &mut (*characteristic.get()).on_read {
-              callback(&mut (*characteristic.get()).value, &desc);
+              callback(*characteristic.get(), &desc);
             }
           }
         }
 
         ble_npl_hw_enter_critical();
-        let value = characteristic.value.value();
-        let rc = os_mbuf_append(ctxt.om, value);
+        let value = characteristic.value.as_slice();
+        let rc = OsMBuf(ctxt.om).append(value);
         ble_npl_hw_exit_critical();
         if rc == 0 {
           0
@@ -354,13 +354,8 @@ impl BLECharacteristic {
         }
       }
       sys::BLE_GATT_ACCESS_OP_WRITE_CHR => {
-        let mut buf = Vec::with_capacity(sys::BLE_ATT_ATTR_MAX_LEN as _);
-        let mut om = ctxt.om;
-        while !om.is_null() {
-          let slice = unsafe { core::slice::from_raw_parts((*om).om_data, (*om).om_len as _) };
-          buf.extend_from_slice(slice);
-          om = unsafe { (*om).om_next.sle_next };
-        }
+        let om = OsMBuf(ctxt.om);
+        let buf = om.as_flat();
 
         let mut notify = false;
 
@@ -369,8 +364,8 @@ impl BLECharacteristic {
           if let Some(callback) = &mut (*characteristic.get()).on_write {
             let desc = crate::utilities::ble_gap_conn_find(conn_handle).unwrap();
             let mut arg = OnWriteArgs {
-              current_data: (*characteristic.get()).value.value(),
-              recv_data: &buf,
+              current_data: (*characteristic.get()).value.as_slice(),
+              recv_data: buf.as_slice(),
               desc: &desc,
               reject: false,
               error_code: 0,
@@ -384,7 +379,7 @@ impl BLECharacteristic {
             notify = arg.notify;
           }
         }
-        characteristic.set_value(&buf);
+        characteristic.set_value(buf.as_slice());
         if notify {
           characteristic.notify();
         }

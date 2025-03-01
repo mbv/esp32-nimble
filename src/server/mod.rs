@@ -1,9 +1,6 @@
 mod att_value;
 pub use self::att_value::AttValue;
 
-mod ble_2904;
-pub use self::ble_2904::*;
-
 mod ble_advertisement_data;
 pub use self::ble_advertisement_data::BLEAdvertisementData;
 
@@ -34,12 +31,9 @@ pub use self::ble_server::BLEServer;
 mod ble_service;
 pub use self::ble_service::BLEService;
 
-#[cfg(all(
-  esp_idf_version_major = "5",
-  esp_idf_version_minor = "2",
-  not(esp_idf_version_patch = "0")
-))]
 pub mod cpfd;
+#[cfg(not(cpfd))]
+mod cpfd_constants;
 
 pub mod hid;
 

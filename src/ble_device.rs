@@ -168,14 +168,14 @@ impl BLEDevice {
   ) -> Result<(), BLEError> {
     unsafe {
       ble!(esp_idf_sys::esp_ble_tx_power_set(
-        power_type as _,
-        power_level as _
+        power_type.into(),
+        power_level.into()
       ))
     }
   }
 
   pub fn get_power(&self, power_type: PowerType) -> PowerLevel {
-    unsafe { core::mem::transmute(esp_idf_sys::esp_ble_tx_power_get(power_type as _)) }
+    PowerLevel::try_from(unsafe { esp_idf_sys::esp_ble_tx_power_get(power_type.into()) }).unwrap()
   }
 
   /// Sets the preferred ATT MTU; the device will indicate this value in all subsequent ATT MTU exchanges.
@@ -247,7 +247,7 @@ impl BLEDevice {
 
     unsafe {
       ble!(esp_idf_sys::ble_hs_id_copy_addr(
-        OWN_ADDR_TYPE as _,
+        OWN_ADDR_TYPE.into(),
         addr.as_mut_ptr(),
         core::ptr::null_mut()
       ))?;
@@ -305,7 +305,7 @@ impl BLEDevice {
     unsafe { ble!(esp_idf_sys::ble_hs_id_set_rnd(addr.as_ptr())) }
   }
 
-  #[allow(temporary_cstring_as_ptr)]
+  #[allow(dangling_pointers_from_temporaries)]
   pub fn set_device_name(device_name: &str) -> Result<(), BLEError> {
     unsafe {
       ble!(esp_idf_sys::ble_svc_gap_device_name_set(
@@ -325,7 +325,7 @@ impl BLEDevice {
 
       let mut addr = [0; 6];
       esp_nofail!(esp_idf_sys::ble_hs_id_copy_addr(
-        OWN_ADDR_TYPE as _,
+        OWN_ADDR_TYPE.into(),
         addr.as_mut_ptr(),
         core::ptr::null_mut()
       ));

@@ -3,6 +3,7 @@ use core::borrow::Borrow;
 use super::ble_client::BLEClientState;
 use super::ble_remote_service::BLERemoteServiceState;
 use super::{BLEReader, BLEWriter};
+use crate::utilities::OsMBuf;
 use crate::BLEAttribute;
 use crate::{
   ble,
@@ -265,8 +266,8 @@ impl BLERemoteCharacteristic {
 
   pub(crate) unsafe fn notify(&mut self, om: *mut esp_idf_sys::os_mbuf) {
     if let Some(no_notify) = self.state.on_notify.as_mut() {
-      let data = unsafe { core::slice::from_raw_parts((*om).om_data, (*om).om_len as _) };
-      no_notify(data);
+      let om = OsMBuf(om);
+      no_notify(om.as_flat().as_slice());
     }
   }
 }

@@ -1,3 +1,24 @@
+## [0.10.2] - 2025-02-13
+- Fix ESP-IDF v5.4 build ([#170](https://github.com/taks/esp32-nimble/pull/170))
+- Added connection Handle check before gap event is handled in characteristic to fix the deadlock issue in #151 ([#171](https://github.com/taks/esp32-nimble/pull/171))
+
+## [0.10.1] - 2025-02-06
+- Fix `on_notify` when data is long ([#167](https://github.com/taks/esp32-nimble/pull/167))
+
+## [0.10.0] - 2025-01-23
+- bump esp-idf-svc and embassy-time version ([#161](https://github.com/taks/esp32-nimble/pull/161))
+- Changed on_read closure argument from `AttValue` to `Self` ([#163](https://github.com/taks/esp32-nimble/pull/163))
+
+## [0.9.0] - 2025-01-07
+- Added L2CAP support ([#117](https://github.com/taks/esp32-nimble/pull/117))
+- Added `BLEDevice::get_addr`
+- Enforce BLEClient creation via BLEDevice instance ([#146](https://github.com/taks/esp32-nimble/pull/146))
+- Added `BLECharacteristic::notify_with`
+- Fix cpfd config attribute ([#153](https://github.com/taks/esp32-nimble/pull/153))
+- Use zerocopy package ([#155](https://github.com/taks/esp32-nimble/pull/155))
+- Merge BLE2904 into Cpfd ([#156](https://github.com/taks/esp32-nimble/pull/156))
+- Upgraded to `esp-idf-svc` 0.50.1 ([#159](https://github.com/taks/esp32-nimble/pull/159))
+
 ## [0.8.2] - 2024-10-25
 - Fix ESP-IDF v5.2.2 build ([#148](https://github.com/taks/esp32-nimble/pull/148))
 
