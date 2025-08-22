@@ -27,8 +27,7 @@ cfg_if::cfg_if! {
       not(any(esp_idf_version_patch = "0", esp_idf_version_patch = "1"))),
     all(
       esp_idf_version_major = "5",
-      esp_idf_version_minor = "4",
-      esp_idf_version_patch = "0"),
+      esp_idf_version_minor = "4"),
   ))] {
     type NotifyTxType = sys::ble_gap_event__bindgen_ty_1__bindgen_ty_12;
     type Subscribe = sys::ble_gap_event__bindgen_ty_1__bindgen_ty_13;
@@ -337,7 +336,7 @@ impl BLECharacteristic {
         unsafe {
           if (*(ctxt.om)).om_pkthdr_len > 8 || characteristic.value.len() <= (desc.mtu() - 3) as _ {
             let characteristic = UnsafeCell::new(&mut characteristic);
-            if let Some(callback) = &mut (*characteristic.get()).on_read {
+            if let Some(callback) = &mut (&mut (*characteristic.get())).on_read {
               callback(*characteristic.get(), &desc);
             }
           }
@@ -361,10 +360,10 @@ impl BLECharacteristic {
 
         unsafe {
           let characteristic = UnsafeCell::new(&mut characteristic);
-          if let Some(callback) = &mut (*characteristic.get()).on_write {
+          if let Some(callback) = &mut (&mut (*characteristic.get())).on_write {
             let desc = crate::utilities::ble_gap_conn_find(conn_handle).unwrap();
             let mut arg = OnWriteArgs {
-              current_data: (*characteristic.get()).value.as_slice(),
+              current_data: (&(*characteristic.get())).value.as_slice(),
               recv_data: buf.as_slice(),
               desc: &desc,
               reject: false,

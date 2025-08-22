@@ -87,7 +87,7 @@ impl BLEClient {
   pub async fn connect(&mut self, addr: &BLEAddress) -> Result<(), BLEError> {
     unsafe {
       if esp_idf_sys::ble_gap_conn_find_by_addr(&addr.value, core::ptr::null_mut()) == 0 {
-        ::log::warn!("A connection to {:?} already exists", addr);
+        ::log::warn!("A connection to {addr:?} already exists");
         return BLEError::fail();
       }
 
@@ -104,10 +104,10 @@ impl BLEClient {
     ble!(self.state.signal.wait().await)?;
     self.state.address = Some(*addr);
 
-    let client = UnsafeCell::new(self);
+    let mut client = UnsafeCell::new(self);
     unsafe {
-      if let Some(callback) = &(*client.get()).state.on_connect {
-        callback(*client.get());
+      if let Some(callback) = &(&(*client.get())).state.on_connect {
+        callback(client.get_mut());
       }
     }
 
@@ -368,7 +368,7 @@ impl BLEClient {
           esp_idf_sys::BLE_SM_IOACT_DISP => {
             pkey.__bindgen_anon_1.passkey = BLEDevice::take().security().get_passkey();
             let rc = unsafe { esp_idf_sys::ble_sm_inject_io(passkey.conn_handle, &mut pkey) };
-            ::log::debug!("BLE_SM_IOACT_DISP; ble_sm_inject_io result: {}", rc);
+            ::log::debug!("BLE_SM_IOACT_DISP; ble_sm_inject_io result: {rc}");
           }
           esp_idf_sys::BLE_SM_IOACT_NUMCMP => {
             if let Some(callback) = &client.state.on_confirm_pin {
@@ -377,7 +377,7 @@ impl BLEClient {
               ::log::warn!("on_passkey_request is not setted");
             }
             let rc = unsafe { esp_idf_sys::ble_sm_inject_io(passkey.conn_handle, &mut pkey) };
-            ::log::debug!("BLE_SM_IOACT_NUMCMP; ble_sm_inject_io result: {}", rc);
+            ::log::debug!("BLE_SM_IOACT_NUMCMP; ble_sm_inject_io result: {rc}");
           }
           esp_idf_sys::BLE_SM_IOACT_INPUT => {
             if let Some(callback) = &client.state.on_passkey_request {
@@ -386,7 +386,7 @@ impl BLEClient {
               ::log::warn!("on_passkey_request is not setted");
             }
             let rc = unsafe { esp_idf_sys::ble_sm_inject_io(passkey.conn_handle, &mut pkey) };
-            ::log::debug!("BLE_SM_IOACT_INPUT; ble_sm_inject_io result: {}", rc);
+            ::log::debug!("BLE_SM_IOACT_INPUT; ble_sm_inject_io result: {rc}");
           }
           esp_idf_sys::BLE_SM_IOACT_NONE => {
             ::log::debug!("BLE_SM_IOACT_NONE; No passkey action required");
@@ -415,9 +415,9 @@ impl BLEClient {
     }
 
     let error = unsafe { &*error };
-    let service = unsafe { &*service };
 
     if error.status == 0 {
+      let service = unsafe { &*service };
       // Found a service - add it to the vector
       let service = BLERemoteService::new(ArcUnsafeCell::downgrade(&client.state), service);
       client.state.services.as_mut().unwrap().push(service);
